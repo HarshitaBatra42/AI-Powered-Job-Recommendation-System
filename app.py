@@ -9,7 +9,8 @@ import pandas as pd
 import PyPDF2
 import re
 import requests
-from recommender import categorize_missing_skills, generate_resume_suggestions_gemini, recommend_jobs
+import uuid
+from recommender import categorize_missing_skills, generate_resume_suggestions_gemini, recommend_jobs, generate_ai_insights
 from roadmap import generate_roadmap
 from skills_utils import extract_skills as extract_skills_from_utils, SKILL_DB, SKILL_ALIASES
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
@@ -41,64 +42,6 @@ def build_fallback_chat_reply(user_query, skills, job_title):
         f"For {job_text}, focus on strengthening {skills_text}, adding practical projects, and tailoring your resume to the role. "
         "If you want, I can also help you turn this into a step-by-step study plan."
     )
-
-
-def generate_ai_insights(resume_text, job_title, skills, missing_skills):
-
-    prompt = f"""
-You are an AI Career Assistant.
-
-Resume Skills:
-{skills}
-
-Target Job:
-{job_title}
-
-Missing Skills:
-{missing_skills}
-
-Give:
-1. ATS Feedback (1-2 lines)
-2. Why this job fits / not fits
-3. Learning roadmap (3 steps only)
-4. 2 project ideas
-
-Be short and structured.
-"""
-
-    model = genai.GenerativeModel("models/gemini-2.5-flash")
-
-    response = model.generate_content(prompt)
-
-    return response.text
-
-
-def extract_skills(text):
-    text = text.lower()
-    found = set()
-
-    for alias, actual in SKILL_ALIASES.items():
-        if alias in text:
-            found.add(actual)
-
-    if re.search(r"\bc\+\+\b", text):
-        found.add("c++")
-
-    if re.search(r"\bc#\b", text):
-        found.add("c#")
-
-    if re.search(r"(?<!\+)\bc\b(?!\+)", text):
-        found.add("c")
-
-    for skill in SKILL_DB:
-        if skill in ["c", "c++", "c#"]:
-            continue
-
-        pattern = r"\b" + re.escape(skill) + r"\b"
-        if re.search(pattern, text):
-            found.add(skill)
-
-    return sorted(list(found))
 
 
 def calculate_ats_score(resume_text, skills):
@@ -337,7 +280,7 @@ def create_pdf_report(
     roadmap,
     projects
 ):
-    pdf_file = "career_report.pdf"
+    pdf_file = f"career_report_{uuid.uuid4().hex[:8]}.pdf"
     doc = SimpleDocTemplate(pdf_file)
     styles = getSampleStyleSheet()
     content = []
@@ -641,29 +584,19 @@ def main():
         resume_text = extract_text(uploaded_file)
         st.session_state["resume_text"] = resume_text
 
-        print("RESUME TEXT:")
-        print(resume_text[:1000])
-
+        
         st.subheader("📄 Extracted Resume Text")
         with st.expander("View Resume Content"):
             st.write(resume_text)
 
-        # Extract skills and ATS score
-        print("\n========== RAW RESUME ==========")
-        print(resume_text)
-        print("================================")
-        skills_only = extract_skills(resume_text)
-        print("extract_skills returned:")
-        print(skills_only)
+       
+        skills_only = extract_skills_from_utils(resume_text)
 
-        print("DETECTED SKILLS:", skills_only)
         ats_data = calculate_ats_score(
         resume_text,
         skills_only
     )
     
-        print("ATS skills:")
-        print(ats_data)
 
         ats_score = ats_data["score"]
         st.session_state["ats_score"] = ats_score
@@ -690,108 +623,129 @@ def main():
         col2.metric("🎯 Jobs Matched", len(results))
 
         st.subheader("📊 ATS Resume Score")
-        st.metric("ATS Score", f"{ats_score}/100")
-        st.progress(ats_score)
+
+        if ats_score >= 80:
+            score_color = "#00b894"
+            score_label = "Excellent"
+        elif ats_score >= 60:
+            score_color = "#fdcb6e"
+            score_label = "Good"
+        else:
+            score_color = "#ff7675"
+            score_label = "Needs Improvement"
+
+        st.markdown(f"""
+<div style="background-color:#161b22; padding:20px; border-radius:12px; border:1px solid #30363d;">
+    <div style="display:flex; justify-content:space-between; align-items:center;">
+        <span style="font-size:28px; font-weight:bold; color:{score_color};">{ats_score}/100</span>
+        <span style="background-color:{score_color}; color:#0e1117; padding:4px 12px; border-radius:20px; font-weight:bold; font-size:13px;">{score_label}</span>
+    </div>
+    <div style="background-color:#30363d; border-radius:10px; height:12px; margin-top:12px; overflow:hidden;">
+        <div style="background-color:{score_color}; width:{ats_score}%; height:100%; border-radius:10px;"></div>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
         ats_data = st.session_state.get("ats_data")
 
         ats_score = st.session_state.get("ats_score", 0)
 
-    if ats_data and results is not None and not results.empty:
+        if ats_data and results is not None and not results.empty:
 
-        st.markdown("### 📋 ATS Breakdown")
+            st.markdown("### 📋 ATS Breakdown")
 
-        st.write(
-            f"✅ Skills: {ats_data['skills_score']}/35"
-        )
+            st.write(
+                f"✅ Skills: {ats_data['skills_score']}/35"
+            )
 
-        st.write(
-            f"✅ Projects: {ats_data['projects_score']}/20"
-        )
+            st.write(
+                f"✅ Projects: {ats_data['projects_score']}/20"
+            )
 
-        st.write(
-            f"✅ Education: {ats_data['education_score']}/15"
-        )
+            st.write(
+                f"✅ Education: {ats_data['education_score']}/15"
+            )
 
-        st.write(
-            f"✅ Experience: {ats_data['experience_score']}/15"
-        )
+            st.write(
+                f"✅ Experience: {ats_data['experience_score']}/15"
+            )
 
-        st.write(
-            f"✅ Certifications: {ats_data['certifications_score']}/10"
-        )
+            st.write(
+                f"✅ Certifications: {ats_data['certifications_score']}/10"
+            )
 
-        st.write(
-            f"✅ Contact Info: {ats_data['contact_score']}/5"
-        )
+            st.write(
+                f"✅ Contact Info: {ats_data['contact_score']}/5"
+            )
 
-        st.write(
-            f"✅ Resume Length: {ats_data['resume_length_score']}/5"
-        )
+            st.write(
+                f"✅ Resume Length: {ats_data['resume_length_score']}/5"
+            )
 
-        st.write(
-            f"✅ LinkedIn/GitHub: {ats_data['links_score']}/5"
-        )
+            st.write(
+                f"✅ LinkedIn/GitHub: {ats_data['links_score']}/5"
+            )
 
-        st.write(
-            f"✅ Summary/Objective: {ats_data.get('summary_score', 0)}/5"
-        )
+            st.write(
+                f"✅ Summary/Objective: {ats_data.get('summary_score', 0)}/5"
+            )
 
-        if ats_score >= 80:
-            st.success("Excellent Resume")
-        elif ats_score >= 60:
-            st.info("Good Resume")
-        else:
-            st.warning("Needs Improvement")
+            if ats_score >= 80:
+                st.success("Excellent Resume")
+            elif ats_score >= 60:
+                st.info("Good Resume")
+            else:
+                st.warning("Needs Improvement")
 
-        top_job = results.iloc[0]["Job Title"]
-        st.session_state["top_job"] = top_job
+            top_job = results.iloc[0]["Job Title"]
+            st.session_state["top_job"] = top_job
 
-        raw_missing = results.iloc[0].get("missing_skills", "")
+            raw_missing = results.iloc[0].get("missing_skills", "")
 
-        if isinstance(raw_missing, list):
-            top_missing = [str(s).strip() for s in raw_missing if str(s).strip() and str(s).strip().lower() != "none"]
-        else:
-            top_missing = [
-                s.strip()
-                for s in str(raw_missing).split(",")
-                if s.strip() and s.strip().lower() != "none"
-            ]
+            if isinstance(raw_missing, list):
+                top_missing = [str(s).strip() for s in raw_missing if str(s).strip() and str(s).strip().lower() != "none"]
+            else:
+                top_missing = [
+                    s.strip()
+                    for s in str(raw_missing).split(",")
+                    if s.strip() and s.strip().lower() != "none"
+                ]
 
-        st.session_state["top_missing"] = top_missing
+            st.session_state["top_missing"] = top_missing
 
-        resume_suggestions = generate_resume_suggestions_gemini(
-        top_job,
-        skills_only,
-        top_missing,
-        ats_data
-    )
-    
-        ai_insight = generate_ai_insights(
-            resume_text,
-            top_job,
-            skills_only,
-            top_missing
-        )
+            resume_suggestions = generate_resume_suggestions_gemini(
+                top_job,
+                skills_only,
+                top_missing,
+                ats_data
+            )
 
-        st.markdown("### 🧠 AI Career Insight (Top Job)")
-        st.write(ai_insight)
+            ai_insight = generate_ai_insights(
+                resume_text,
+                top_job,
+                skills_only,
+                top_missing
+            )
 
-    
-        suggestions = generate_resume_suggestions(ats_data,
-        skills_only,
-        top_missing,
-        top_job)
+            st.markdown("### 🧠 AI Career Insight (Top Job)")
+            st.write(ai_insight)
 
-        st.markdown("### 📈 Resume Improvement Suggestions")
+            suggestions = generate_resume_suggestions(
+                ats_data,
+                skills_only,
+                top_missing,
+                top_job
+            )
 
-        for suggestion in suggestions:
-            st.markdown(f"- {suggestion}")
+            st.markdown("### 📈 Resume Improvement Suggestions")
 
-        top_roadmap = generate_roadmap(top_missing, top_job)
-        st.session_state["top_roadmap"] = top_roadmap
+            for suggestion in suggestions:
+                st.markdown(f"- {suggestion}")
 
+            top_roadmap = generate_roadmap(top_missing, top_job)
+            st.session_state["top_roadmap"] = top_roadmap
 
+    # Retrieve session state for display sections
     ats_score = st.session_state.get("ats_score", 0)
     skills_only = st.session_state.get("skills_only", [])
     results = st.session_state.get("results", pd.DataFrame())
@@ -808,19 +762,19 @@ def main():
     if (
         uploaded_file is not None
         and not st.session_state.report_saved
+        and ats_score > 0
     ):
-
         save_report(
             st.session_state.user["id"],
             uploaded_file.name,
             ats_score,
             top_job
         )
-
         st.session_state.report_saved = True
 
     if results is None or results.empty:
         st.stop()
+
     pdf_path = create_pdf_report(
         ats_score,
         skills_only,
@@ -829,197 +783,170 @@ def main():
         top_roadmap["roadmap"],
         top_roadmap["projects"]
     )
-        
+
     with open(pdf_path, "rb") as pdf:
-                st.download_button(
-                     label="📥 Download Career Report",
-                     data=pdf,
-                     file_name="career_report.pdf",
-                     mime="application/pdf"
+        st.download_button(
+            label="📥 Download Career Report",
+            data=pdf,
+            file_name="career_report.pdf",
+            mime="application/pdf"
         )
 
-            # -----------------------------
-            # DETECTED SKILLS
-            # -----------------------------
+    # DETECTED SKILLS
     st.subheader("🧠 Detected Skills")
 
     if skills_only:
+        cols = st.columns(
+            min(len(skills_only), 6)
+        )
 
-                cols = st.columns(
-                    min(len(skills_only), 6)
-                )
-
-                for i, skill in enumerate(
-                    skills_only
-                ):
-
-                    cols[
-                        i % len(cols)
-                    ].markdown(
-                        f"🟢 {skill}"
-                    )
-
-    else:
-
-                st.warning(
-                    "No skills detected."
-                )
-
-            # -----------------------------
-            # JOB RECOMMENDATIONS
-            # -----------------------------
-    st.subheader(
-                "🎯 Top Job Recommendations"
+        for i, skill in enumerate(
+            skills_only
+        ):
+            cols[
+                i % len(cols)
+            ].markdown(
+                f"🟢 {skill}"
             )
+    else:
+        st.warning(
+            "No skills detected."
+        )
+
+    # JOB RECOMMENDATIONS
+    st.subheader(
+        "🎯 Top Job Recommendations"
+    )
 
     if results is None or results.empty:
         st.warning("No job recommendations available.")
         st.stop()
 
     for _, row in results.head(5).iterrows():
+        st.markdown(f"""
+            <div style="
+            background-color:#161b22;
+            padding:20px;
+            border-radius:15px;
+            border:1px solid #30363d;
+            margin-bottom:15px;">
+            """, unsafe_allow_html=True)
 
-                st.markdown(f"""
-                <div style="
-                background-color:#161b22;
-                padding:20px;
-                border-radius:15px;
-                border:1px solid #30363d;
-                margin-bottom:15px;">
-                """, unsafe_allow_html=True)
+        st.markdown(
+            f"### 💼 {row['Job Title']}"
+        )
 
-                # -----------------------------
-                # JOB TITLE
-                # -----------------------------
+        st.markdown(
+            f"🟢 Skill Match: {row['skill_score']:.2f}%"
+        )
+
+        st.markdown(
+            f"🟢 Resume Match: {row['resume_score']:.2f}%"
+        )
+
+        st.markdown(
+            f"🟢 Overall Match: {row['overall_score']:.2f}%"
+        )
+
+        st.progress(
+            min(
+                int(row['overall_score']),
+                100
+            )
+        )
+
+        st.markdown(
+            "#### 🔍 Missing Skills"
+        )
+
+        missing = row.get(
+            "missing_skills",
+            ""
+        )
+
+        if isinstance(missing, list):
+            skills = [str(s).strip() for s in missing if str(s).strip() and str(s).strip().lower() != "none"]
+        else:
+            skills = [
+                s.strip()
+                for s in str(missing).split(",")
+                if s.strip()
+                and s.strip().lower() != "none"
+            ]
+
+        if skills:
+            categorized = categorize_missing_skills(
+                skills
+            )
+
+            if categorized["high"]:
                 st.markdown(
-                    f"### 💼 {row['Job Title']}"
+                    "🔥 High Priority"
                 )
-
-                st.markdown(
-        f"🟢 Skill Match: {row['skill_score']:.2f}%"
-    )
-
-                st.markdown(
-        f"🟢 Resume Match: {row['resume_score']:.2f}%"
-    )
-
-                st.markdown(
-        f"🟢 Overall Match: {row['overall_score']:.2f}%"
-    )
-
-                st.progress(
-                    min(
-                        int(row['overall_score']),
-                        100
-                    )
-                )
-
-                # -----------------------------
-                # MISSING SKILLS
-                # -----------------------------
-                # -----------------------------
-
-                st.markdown(
-        "#### 🔍 Missing Skills"
-    )
-
-                missing = row.get(
-        "missing_skills",
-        ""
-    )
-
-                if isinstance(missing, list):
-                    skills = [str(s).strip() for s in missing if str(s).strip() and str(s).strip().lower() != "none"]
-                else:
-                    skills = [
-                        s.strip()
-                        for s in str(missing).split(",")
-                        if s.strip()
-                        and s.strip().lower() != "none"
-                    ]
-
-                if skills:
-                    categorized = categorize_missing_skills(
-                        skills
-                    )
-
-                    if categorized["high"]:
-                        st.markdown(
-                            "🔥 High Priority"
-                        )
-                        for skill in categorized["high"]:
-                            st.markdown(
-                                f"- {skill}"
-                            )
-
-                    if categorized["medium"]:
-                        st.markdown(
-                            "🟡 Medium Priority"
-                        )
-                        for skill in categorized["medium"]:
-                            st.markdown(
-                                f"- {skill}"
-                            )
-
-                    if categorized["low"]:
-                        st.markdown(
-                            "🟢 Nice To Have"
-                        )
-                        for skill in categorized["low"]:
-                            st.markdown(
-                                f"- {skill}"
-                            )
-                else:
-                    st.info(
-                        "No explicit missing skills were detected for this role."
-                    )
-
-                # -----------------------------
-                # ROADMAP
-                # -----------------------------
-                roadmap_data = generate_roadmap(
-                    skills,
-                    row["Job Title"]
-                )
-
-                st.markdown(
-                    "#### 🛣️ Learning Roadmap"
-                )
-
-                for i, step in enumerate(
-                    roadmap_data["roadmap"],
-                    start=1
-                ):
-
+                for skill in categorized["high"]:
                     st.markdown(
-                        f"{i}. {step}"
+                        f"- {skill}"
                     )
 
-                # -----------------------------
-                # PROJECTS
-                # -----------------------------
+            if categorized["medium"]:
                 st.markdown(
-                    "#### 💡 Recommended Projects"
+                    "🟡 Medium Priority"
                 )
-
-                for i, project in enumerate(
-                    roadmap_data["projects"],
-                    start=1
-                ):
-
+                for skill in categorized["medium"]:
                     st.markdown(
-                        f"{i}. {project}"
+                        f"- {skill}"
                     )
 
+            if categorized["low"]:
                 st.markdown(
-                    "</div>",
-                    unsafe_allow_html=True
+                    "🟢 Nice To Have"
                 )
+                for skill in categorized["low"]:
+                    st.markdown(
+                        f"- {skill}"
+                    )
+        else:
+            st.info(
+                "No explicit missing skills were detected for this role."
+            )
+
+        roadmap_data = generate_roadmap(
+            skills,
+            row["Job Title"]
+        )
+
+        st.markdown(
+            "#### 🛣️ Learning Roadmap"
+        )
+
+        for i, step in enumerate(
+            roadmap_data["roadmap"],
+            start=1
+        ):
+            st.markdown(
+                f"{i}. {step}"
+            )
+
+        st.markdown(
+            "#### 💡 Recommended Projects"
+        )
+
+        for i, project in enumerate(
+            roadmap_data["projects"],
+            start=1
+        ):
+            st.markdown(
+                f"{i}. {project}"
+            )
+
+        st.markdown(
+            "</div>",
+            unsafe_allow_html=True
+        )
 
 
 
-                # -----------------------------
-    # CHATBOT SECTION (FIXED)
-    # -----------------------------
+    # CHATBOT SECTION
     st.markdown("---")
     st.subheader("🤖 Career Chatbot")
 
@@ -1029,9 +956,7 @@ def main():
     user_query = st.text_input("Ask your career question:")
 
     if user_query:
-
         if results is not None and len(results) > 0:
-
             st.session_state["chat_history"].append(
                 {
                     "role": "user",
@@ -1074,22 +999,17 @@ def main():
             )
 
             st.success(ai_reply)
-
         else:
             st.warning("Please analyze resume first.")
-
-
 
     st.markdown("---")
     st.subheader("💬 Chat History")
 
     for msg in st.session_state["chat_history"]:
-
         if msg["role"] == "user":
             st.markdown(
                 f"🧑 **You:** {msg['content']}"
             )
-
         else:
             st.markdown(
                 f"🤖 **AI:** {msg['content']}"
