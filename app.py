@@ -650,46 +650,53 @@ def main():
 
         ats_score = st.session_state.get("ats_score", 0)
 
+        def score_icon(score, max_score):
+            if score == 0:
+                return "❌"
+            elif score < max_score * 0.6:
+                return "⚠️"
+            else:
+                return "✅"
+
         if ats_data and results is not None and not results.empty:
 
             st.markdown("### 📋 ATS Breakdown")
 
             st.write(
-                f"✅ Skills: {ats_data['skills_score']}/35"
+                f"{score_icon(ats_data['skills_score'], 35)} Skills: {ats_data['skills_score']}/35"
             )
 
             st.write(
-                f"✅ Projects: {ats_data['projects_score']}/20"
+                f"{score_icon(ats_data['projects_score'], 20)} Projects: {ats_data['projects_score']}/20"
             )
 
             st.write(
-                f"✅ Education: {ats_data['education_score']}/15"
+                f"{score_icon(ats_data['education_score'], 15)} Education: {ats_data['education_score']}/15"
             )
 
             st.write(
-                f"✅ Experience: {ats_data['experience_score']}/15"
+                f"{score_icon(ats_data['experience_score'], 15)} Experience: {ats_data['experience_score']}/15"
             )
 
             st.write(
-                f"✅ Certifications: {ats_data['certifications_score']}/10"
+                f"{score_icon(ats_data['certifications_score'], 10)} Certifications: {ats_data['certifications_score']}/10"
             )
 
             st.write(
-                f"✅ Contact Info: {ats_data['contact_score']}/5"
+                f"{score_icon(ats_data['contact_score'], 5)} Contact Info: {ats_data['contact_score']}/5"
             )
 
             st.write(
-                f"✅ Resume Length: {ats_data['resume_length_score']}/5"
+                f"{score_icon(ats_data['resume_length_score'], 5)} Resume Length: {ats_data['resume_length_score']}/5"
             )
 
             st.write(
-                f"✅ LinkedIn/GitHub: {ats_data['links_score']}/5"
+                f"{score_icon(ats_data['links_score'], 5)} LinkedIn/GitHub: {ats_data['links_score']}/5"
             )
 
             st.write(
-                f"✅ Summary/Objective: {ats_data.get('summary_score', 0)}/5"
+                f"{score_icon(ats_data.get('summary_score', 0), 5)} Summary/Objective: {ats_data.get('summary_score', 0)}/5"
             )
-
             if ats_score >= 80:
                 st.success("Excellent Resume")
             elif ats_score >= 60:
