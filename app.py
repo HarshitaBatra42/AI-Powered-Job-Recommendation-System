@@ -338,7 +338,6 @@ def main():
     if "results" not in st.session_state:
         st.session_state["results"] = None
 
-
     if "chat_history" not in st.session_state:
         st.session_state["chat_history"] = []
 
@@ -347,7 +346,6 @@ def main():
 
     if "resume_text" not in st.session_state:
         st.session_state["resume_text"] = ""
-
 
     # -----------------------------
     # DARK THEME UI
@@ -391,7 +389,6 @@ def main():
     st.title("💼 AI-Powered Job Recommendation System")
     if "user" not in st.session_state:
         st.session_state.user = None
-
 
     if st.session_state.user is None:
 
@@ -488,7 +485,6 @@ def main():
 
             st.rerun()
 
-
     if reports_page:
 
         reports = get_reports(
@@ -521,8 +517,6 @@ def main():
             )
 
         st.stop()
-
-
 
     st.sidebar.markdown("""
     ### 📊 Features:
@@ -560,10 +554,6 @@ def main():
     ats_score = st.session_state.get("ats_score", 0)
     resume_text = st.session_state.get("resume_text", "")
 
-
-    # PDF TEXT EXTRACTION
-    # -----------------------------
-
     # -----------------------------
     # FILE UPLOAD
     # -----------------------------
@@ -573,6 +563,7 @@ def main():
     )
     if uploaded_file:
         st.session_state.report_saved = False
+
     # -----------------------------
     # MAIN LOGIC
     # -----------------------------
@@ -584,19 +575,16 @@ def main():
         resume_text = extract_text(uploaded_file)
         st.session_state["resume_text"] = resume_text
 
-        
         st.subheader("📄 Extracted Resume Text")
         with st.expander("View Resume Content"):
             st.write(resume_text)
 
-       
         skills_only = extract_skills_from_utils(resume_text)
 
         ats_data = calculate_ats_score(
-        resume_text,
-        skills_only
-    )
-    
+            resume_text,
+            skills_only
+        )
 
         ats_score = ats_data["score"]
         st.session_state["ats_score"] = ats_score
@@ -617,7 +605,100 @@ def main():
             st.warning("No job recommendations found.")
             st.stop()
 
-        # Metrics
+        top_job = results.iloc[0]["Job Title"]
+        st.session_state["top_job"] = top_job
+
+        raw_missing = results.iloc[0].get("missing_skills", "")
+        if isinstance(raw_missing, list):
+            top_missing = [str(s).strip() for s in raw_missing if str(s).strip() and str(s).strip().lower() != "none"]
+        else:
+            top_missing = [
+                s.strip()
+                for s in str(raw_missing).split(",")
+                if s.strip() and s.strip().lower() != "none"
+            ]
+
+        st.session_state["top_missing"] = top_missing
+
+        resume_suggestions = generate_resume_suggestions_gemini(
+            top_job,
+            skills_only,
+            top_missing,
+            ats_data
+        )
+
+        ai_insight = generate_ai_insights(
+            resume_text,
+            top_job,
+            skills_only,
+            top_missing
+        )
+
+        st.session_state["ai_insight"] = ai_insight
+
+        suggestions = generate_resume_suggestions(
+            ats_data,
+            skills_only,
+            top_missing,
+            top_job
+        )
+        st.session_state["suggestions"] = suggestions
+
+        top_roadmap = generate_roadmap(top_missing, top_job)
+        st.session_state["top_roadmap"] = top_roadmap
+
+    # Retrieve session state for display sections
+    ats_score = st.session_state.get("ats_score", 0)
+    ats_data = st.session_state.get("ats_data")
+    skills_only = st.session_state.get("skills_only", [])
+    results = st.session_state.get("results", pd.DataFrame())
+    top_missing = st.session_state.get("top_missing", [])
+    top_roadmap = st.session_state.get(
+        "top_roadmap",
+        {"roadmap": [], "projects": []}
+    )
+    top_job = st.session_state.get("top_job", "")
+    ai_insight = st.session_state.get("ai_insight", "")
+    suggestions = st.session_state.get("suggestions", [])
+
+    if "report_saved" not in st.session_state:
+        st.session_state.report_saved = False
+
+    if (
+        uploaded_file is not None
+        and not st.session_state.report_saved
+        and ats_score > 0
+    ):
+        save_report(
+            st.session_state.user["id"],
+            uploaded_file.name,
+            ats_score,
+            top_job
+        )
+        st.session_state.report_saved = True
+
+    if results is None or results.empty:
+        st.stop()
+
+    def score_icon(score, max_score):
+        if score == 0:
+            return "❌"
+        elif score < max_score * 0.6:
+            return "⚠️"
+        else:
+            return "✅"
+
+    # -----------------------------
+    # TABS
+    # -----------------------------
+    tab_overview, tab_insights, tab_jobs, tab_chatbot = st.tabs(
+        ["📊 Overview", "🧠 AI Insights", "💼 Job Matches", "🤖 Career Chatbot"]
+    )
+
+    # -----------------------------
+    # TAB 1: OVERVIEW
+    # -----------------------------
+    with tab_overview:
         col1, col2 = st.columns(2)
         col1.metric("🧠 Skills Detected", len(skills_only))
         col2.metric("🎯 Jobs Matched", len(results))
@@ -646,57 +727,19 @@ def main():
 </div>
 """, unsafe_allow_html=True)
 
-        ats_data = st.session_state.get("ats_data")
-
-        ats_score = st.session_state.get("ats_score", 0)
-
-        def score_icon(score, max_score):
-            if score == 0:
-                return "❌"
-            elif score < max_score * 0.6:
-                return "⚠️"
-            else:
-                return "✅"
-
-        if ats_data and results is not None and not results.empty:
-
+        if ats_data:
             st.markdown("### 📋 ATS Breakdown")
 
-            st.write(
-                f"{score_icon(ats_data['skills_score'], 35)} Skills: {ats_data['skills_score']}/35"
-            )
+            st.write(f"{score_icon(ats_data['skills_score'], 35)} Skills: {ats_data['skills_score']}/35")
+            st.write(f"{score_icon(ats_data['projects_score'], 20)} Projects: {ats_data['projects_score']}/20")
+            st.write(f"{score_icon(ats_data['education_score'], 15)} Education: {ats_data['education_score']}/15")
+            st.write(f"{score_icon(ats_data['experience_score'], 15)} Experience: {ats_data['experience_score']}/15")
+            st.write(f"{score_icon(ats_data['certifications_score'], 10)} Certifications: {ats_data['certifications_score']}/10")
+            st.write(f"{score_icon(ats_data['contact_score'], 5)} Contact Info: {ats_data['contact_score']}/5")
+            st.write(f"{score_icon(ats_data['resume_length_score'], 5)} Resume Length: {ats_data['resume_length_score']}/5")
+            st.write(f"{score_icon(ats_data['links_score'], 5)} LinkedIn/GitHub: {ats_data['links_score']}/5")
+            st.write(f"{score_icon(ats_data.get('summary_score', 0), 5)} Summary/Objective: {ats_data.get('summary_score', 0)}/5")
 
-            st.write(
-                f"{score_icon(ats_data['projects_score'], 20)} Projects: {ats_data['projects_score']}/20"
-            )
-
-            st.write(
-                f"{score_icon(ats_data['education_score'], 15)} Education: {ats_data['education_score']}/15"
-            )
-
-            st.write(
-                f"{score_icon(ats_data['experience_score'], 15)} Experience: {ats_data['experience_score']}/15"
-            )
-
-            st.write(
-                f"{score_icon(ats_data['certifications_score'], 10)} Certifications: {ats_data['certifications_score']}/10"
-            )
-
-            st.write(
-                f"{score_icon(ats_data['contact_score'], 5)} Contact Info: {ats_data['contact_score']}/5"
-            )
-
-            st.write(
-                f"{score_icon(ats_data['resume_length_score'], 5)} Resume Length: {ats_data['resume_length_score']}/5"
-            )
-
-            st.write(
-                f"{score_icon(ats_data['links_score'], 5)} LinkedIn/GitHub: {ats_data['links_score']}/5"
-            )
-
-            st.write(
-                f"{score_icon(ats_data.get('summary_score', 0), 5)} Summary/Objective: {ats_data.get('summary_score', 0)}/5"
-            )
             if ats_score >= 80:
                 st.success("Excellent Resume")
             elif ats_score >= 60:
@@ -704,323 +747,175 @@ def main():
             else:
                 st.warning("Needs Improvement")
 
-            top_job = results.iloc[0]["Job Title"]
-            st.session_state["top_job"] = top_job
+        pdf_path = create_pdf_report(
+            ats_score,
+            skills_only,
+            results,
+            top_missing,
+            top_roadmap["roadmap"],
+            top_roadmap["projects"]
+        )
 
-            raw_missing = results.iloc[0].get("missing_skills", "")
-
-            if isinstance(raw_missing, list):
-                top_missing = [str(s).strip() for s in raw_missing if str(s).strip() and str(s).strip().lower() != "none"]
-            else:
-                top_missing = [
-                    s.strip()
-                    for s in str(raw_missing).split(",")
-                    if s.strip() and s.strip().lower() != "none"
-                ]
-
-            st.session_state["top_missing"] = top_missing
-
-            resume_suggestions = generate_resume_suggestions_gemini(
-                top_job,
-                skills_only,
-                top_missing,
-                ats_data
+        with open(pdf_path, "rb") as pdf:
+            st.download_button(
+                label="📥 Download Career Report",
+                data=pdf,
+                file_name="career_report.pdf",
+                mime="application/pdf"
             )
 
-            ai_insight = generate_ai_insights(
-                resume_text,
-                top_job,
-                skills_only,
-                top_missing
-            )
-
+    # -----------------------------
+    # TAB 2: AI INSIGHTS
+    # -----------------------------
+    with tab_insights:
+        if ai_insight:
             st.markdown("### 🧠 AI Career Insight (Top Job)")
             st.write(ai_insight)
+        else:
+            st.info("Analyze a resume to see AI insights here.")
 
-            suggestions = generate_resume_suggestions(
-                ats_data,
-                skills_only,
-                top_missing,
-                top_job
-            )
-
+        if suggestions:
             st.markdown("### 📈 Resume Improvement Suggestions")
-
             for suggestion in suggestions:
                 st.markdown(f"- {suggestion}")
 
-            top_roadmap = generate_roadmap(top_missing, top_job)
-            st.session_state["top_roadmap"] = top_roadmap
-
-    # Retrieve session state for display sections
-    ats_score = st.session_state.get("ats_score", 0)
-    skills_only = st.session_state.get("skills_only", [])
-    results = st.session_state.get("results", pd.DataFrame())
-    top_missing = st.session_state.get("top_missing", [])
-    top_roadmap = st.session_state.get(
-        "top_roadmap",
-        {"roadmap": [], "projects": []}
-    )
-    top_job = st.session_state.get("top_job", "")
-
-    if "report_saved" not in st.session_state:
-        st.session_state.report_saved = False
-
-    if (
-        uploaded_file is not None
-        and not st.session_state.report_saved
-        and ats_score > 0
-    ):
-        save_report(
-            st.session_state.user["id"],
-            uploaded_file.name,
-            ats_score,
-            top_job
-        )
-        st.session_state.report_saved = True
-
-    if results is None or results.empty:
-        st.stop()
-
-    pdf_path = create_pdf_report(
-        ats_score,
-        skills_only,
-        results,
-        top_missing,
-        top_roadmap["roadmap"],
-        top_roadmap["projects"]
-    )
-
-    with open(pdf_path, "rb") as pdf:
-        st.download_button(
-            label="📥 Download Career Report",
-            data=pdf,
-            file_name="career_report.pdf",
-            mime="application/pdf"
-        )
-
-    # DETECTED SKILLS
-    st.subheader("🧠 Detected Skills")
-
-    if skills_only:
-        cols = st.columns(
-            min(len(skills_only), 6)
-        )
-
-        for i, skill in enumerate(
-            skills_only
-        ):
-            cols[
-                i % len(cols)
-            ].markdown(
-                f"🟢 {skill}"
-            )
-    else:
-        st.warning(
-            "No skills detected."
-        )
-
-    # JOB RECOMMENDATIONS
-    st.subheader(
-        "🎯 Top Job Recommendations"
-    )
-
-    if results is None or results.empty:
-        st.warning("No job recommendations available.")
-        st.stop()
-
-    for _, row in results.head(5).iterrows():
-        st.markdown(f"""
-            <div style="
-            background-color:#161b22;
-            padding:20px;
-            border-radius:15px;
-            border:1px solid #30363d;
-            margin-bottom:15px;">
-            """, unsafe_allow_html=True)
-
-        st.markdown(
-            f"### 💼 {row['Job Title']}"
-        )
-
-        st.markdown(
-            f"🟢 Skill Match: {row['skill_score']:.2f}%"
-        )
-
-        st.markdown(
-            f"🟢 Resume Match: {row['resume_score']:.2f}%"
-        )
-
-        st.markdown(
-            f"🟢 Overall Match: {row['overall_score']:.2f}%"
-        )
-
-        st.progress(
-            min(
-                int(row['overall_score']),
-                100
-            )
-        )
-
-        st.markdown(
-            "#### 🔍 Missing Skills"
-        )
-
-        missing = row.get(
-            "missing_skills",
-            ""
-        )
-
-        if isinstance(missing, list):
-            skills = [str(s).strip() for s in missing if str(s).strip() and str(s).strip().lower() != "none"]
+        st.markdown("### 🧠 Detected Skills")
+        if skills_only:
+            cols = st.columns(min(len(skills_only), 6))
+            for i, skill in enumerate(skills_only):
+                cols[i % len(cols)].markdown(f"🟢 {skill}")
         else:
-            skills = [
-                s.strip()
-                for s in str(missing).split(",")
-                if s.strip()
-                and s.strip().lower() != "none"
-            ]
+            st.warning("No skills detected.")
 
-        if skills:
-            categorized = categorize_missing_skills(
-                skills
-            )
+    # -----------------------------
+    # TAB 3: JOB MATCHES
+    # -----------------------------
+    with tab_jobs:
+        st.subheader("🎯 Top Job Recommendations")
 
-            if categorized["high"]:
-                st.markdown(
-                    "🔥 High Priority"
+        for _, row in results.head(5).iterrows():
+            st.markdown(f"""
+                <div style="
+                background-color:#161b22;
+                padding:20px;
+                border-radius:15px;
+                border:1px solid #30363d;
+                margin-bottom:15px;">
+                """, unsafe_allow_html=True)
+
+            st.markdown(f"### 💼 {row['Job Title']}")
+            st.markdown(f"🟢 Skill Match: {row['skill_score']:.2f}%")
+            st.markdown(f"🟢 Resume Match: {row['resume_score']:.2f}%")
+            st.markdown(f"🟢 Overall Match: {row['overall_score']:.2f}%")
+
+            st.progress(min(int(row['overall_score']), 100))
+
+            st.markdown("#### 🔍 Missing Skills")
+
+            missing = row.get("missing_skills", "")
+
+            if isinstance(missing, list):
+                skills = [str(s).strip() for s in missing if str(s).strip() and str(s).strip().lower() != "none"]
+            else:
+                skills = [
+                    s.strip()
+                    for s in str(missing).split(",")
+                    if s.strip() and s.strip().lower() != "none"
+                ]
+
+            if skills:
+                categorized = categorize_missing_skills(skills)
+
+                if categorized["high"]:
+                    st.markdown("🔥 High Priority")
+                    for skill in categorized["high"]:
+                        st.markdown(f"- {skill}")
+
+                if categorized["medium"]:
+                    st.markdown("🟡 Medium Priority")
+                    for skill in categorized["medium"]:
+                        st.markdown(f"- {skill}")
+
+                if categorized["low"]:
+                    st.markdown("🟢 Nice To Have")
+                    for skill in categorized["low"]:
+                        st.markdown(f"- {skill}")
+            else:
+                st.info("No explicit missing skills were detected for this role.")
+
+            roadmap_data = generate_roadmap(skills, row["Job Title"])
+
+            st.markdown("#### 🛣️ Learning Roadmap")
+            for i, step in enumerate(roadmap_data["roadmap"], start=1):
+                st.markdown(f"{i}. {step}")
+
+            st.markdown("#### 💡 Recommended Projects")
+            for i, project in enumerate(roadmap_data["projects"], start=1):
+                st.markdown(f"{i}. {project}")
+
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    # -----------------------------
+    # TAB 4: CAREER CHATBOT
+    # -----------------------------
+    with tab_chatbot:
+        st.subheader("🤖 Career Chatbot")
+
+        skills = st.session_state.get("skills_only", [])
+        chat_results = st.session_state.get("results", None)
+
+        user_query = st.text_input("Ask your career question:")
+
+        if user_query:
+            if chat_results is not None and len(chat_results) > 0:
+                st.session_state["chat_history"].append(
+                    {"role": "user", "content": user_query}
                 )
-                for skill in categorized["high"]:
-                    st.markdown(
-                        f"- {skill}"
+
+                try:
+                    response = requests.post(
+                        "http://127.0.0.1:8000/chat",
+                        json={
+                            "message": user_query,
+                            "skills": skills,
+                            "job": chat_results.iloc[0]["Job Title"],
+                            "history": st.session_state["chat_history"]
+                        },
+                        timeout=5,
                     )
 
-            if categorized["medium"]:
-                st.markdown(
-                    "🟡 Medium Priority"
-                )
-                for skill in categorized["medium"]:
-                    st.markdown(
-                        f"- {skill}"
-                    )
-
-            if categorized["low"]:
-                st.markdown(
-                    "🟢 Nice To Have"
-                )
-                for skill in categorized["low"]:
-                    st.markdown(
-                        f"- {skill}"
-                    )
-        else:
-            st.info(
-                "No explicit missing skills were detected for this role."
-            )
-
-        roadmap_data = generate_roadmap(
-            skills,
-            row["Job Title"]
-        )
-
-        st.markdown(
-            "#### 🛣️ Learning Roadmap"
-        )
-
-        for i, step in enumerate(
-            roadmap_data["roadmap"],
-            start=1
-        ):
-            st.markdown(
-                f"{i}. {step}"
-            )
-
-        st.markdown(
-            "#### 💡 Recommended Projects"
-        )
-
-        for i, project in enumerate(
-            roadmap_data["projects"],
-            start=1
-        ):
-            st.markdown(
-                f"{i}. {project}"
-            )
-
-        st.markdown(
-            "</div>",
-            unsafe_allow_html=True
-        )
-
-
-
-    # CHATBOT SECTION
-    st.markdown("---")
-    st.subheader("🤖 Career Chatbot")
-
-    skills = st.session_state.get("skills_only", [])
-    results = st.session_state.get("results", None)
-
-    user_query = st.text_input("Ask your career question:")
-
-    if user_query:
-        if results is not None and len(results) > 0:
-            st.session_state["chat_history"].append(
-                {
-                    "role": "user",
-                    "content": user_query
-                }
-            )
-
-            try:
-                response = requests.post(
-                    "http://127.0.0.1:8000/chat",
-                    json={
-                        "message": user_query,
-                        "skills": skills,
-                        "job": results.iloc[0]["Job Title"],
-                        "history": st.session_state["chat_history"]
-                    },
-                    timeout=5,
-                )
-
-                if response.status_code == 200:
-                    ai_reply = response.json().get("response", "No response received.")
-                else:
+                    if response.status_code == 200:
+                        ai_reply = response.json().get("response", "No response received.")
+                    else:
+                        ai_reply = build_fallback_chat_reply(
+                            user_query,
+                            skills,
+                            chat_results.iloc[0]["Job Title"] if chat_results is not None and len(chat_results) > 0 else None,
+                        )
+                except requests.exceptions.RequestException:
                     ai_reply = build_fallback_chat_reply(
                         user_query,
                         skills,
-                        results.iloc[0]["Job Title"] if results is not None and len(results) > 0 else None,
+                        chat_results.iloc[0]["Job Title"] if chat_results is not None and len(chat_results) > 0 else None,
                     )
-            except requests.exceptions.RequestException:
-                ai_reply = build_fallback_chat_reply(
-                    user_query,
-                    skills,
-                    results.iloc[0]["Job Title"] if results is not None and len(results) > 0 else None,
+
+                st.session_state["chat_history"].append(
+                    {"role": "assistant", "content": ai_reply}
                 )
 
-            st.session_state["chat_history"].append(
-                {
-                    "role": "assistant",
-                    "content": ai_reply
-                }
-            )
+                st.success(ai_reply)
+            else:
+                st.warning("Please analyze resume first.")
 
-            st.success(ai_reply)
-        else:
-            st.warning("Please analyze resume first.")
+        st.markdown("---")
+        st.subheader("💬 Chat History")
 
-    st.markdown("---")
-    st.subheader("💬 Chat History")
+        for msg in st.session_state["chat_history"]:
+            if msg["role"] == "user":
+                st.markdown(f"🧑 **You:** {msg['content']}")
+            else:
+                st.markdown(f"🤖 **AI:** {msg['content']}")
 
-    for msg in st.session_state["chat_history"]:
-        if msg["role"] == "user":
-            st.markdown(
-                f"🧑 **You:** {msg['content']}"
-            )
-        else:
-            st.markdown(
-                f"🤖 **AI:** {msg['content']}"
-            )
 
 if __name__ == "__main__":
     main()
