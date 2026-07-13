@@ -335,6 +335,47 @@ def recommend_jobs(user_resume_text):
     return results.to_dict(orient="records")
 
 
+def generate_interview_questions(job_title, skills, missing_skills, num_questions=10):
+    skills_text = ", ".join(skills) if skills else "general foundational skills"
+    missing_text = ", ".join(missing_skills) if missing_skills else "none identified"
+
+    prompt = f"""
+You are an experienced technical interviewer preparing a candidate for a {job_title} interview.
+
+Candidate's current skills: {skills_text}
+Candidate's missing/weak skills for this role: {missing_text}
+
+Generate exactly {num_questions} interview questions for this candidate, mixing:
+- Technical questions based on their CURRENT skills (to test real depth, not just definitions)
+- A few technical questions specifically targeting their MISSING skills (so they can prepare for likely gaps)
+- Behavioral/HR questions appropriate for this role level
+
+Format each line EXACTLY like this, one question per line, no numbering, no extra text:
+Technical: <question>
+Behavioral: <question>
+
+Do not add any introduction, explanation, or summary. Only output the {num_questions} lines, nothing else.
+"""
+    model = genai.GenerativeModel("models/gemini-2.5-flash")
+    response = model.generate_content(prompt)
+    raw_text = response.text.strip()
+
+    questions = []
+    for line in raw_text.split("\n"):
+        line = line.strip()
+        if not line or ":" not in line:
+            continue
+        category, question_text = line.split(":", 1)
+        category = category.strip().lower()
+        question_text = question_text.strip()
+        if category not in ["technical", "behavioral"]:
+            category = "technical"
+        if question_text:
+            questions.append({"category": category, "question": question_text})
+
+    return questions
+
+
 def generate_ai_insights(resume_text, job_title, skills, missing_skills):
     prompt = f"""
 You are an AI Career Assistant.
