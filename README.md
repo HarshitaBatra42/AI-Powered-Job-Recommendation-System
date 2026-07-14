@@ -2,7 +2,7 @@
 
 ## 🌐 Live Demo
 
-👉 https://ai-powered-job-recommendation-system-syin44wx7utbi4get9hxuc.streamlit.app
+👉https://harshitabatra42-ai-powered-job-recommendation-system-app-aaacqa.streamlit.app/
 
 ---
 
