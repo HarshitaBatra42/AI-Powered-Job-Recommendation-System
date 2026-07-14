@@ -13,3 +13,4 @@ seaborn==0.13.2
 requests==2.34.2
 psycopg2-binary==2.9.12
 bcrypt==4.2.0
+python-dotenv==1.0.1
