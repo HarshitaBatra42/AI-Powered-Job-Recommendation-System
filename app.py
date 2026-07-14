@@ -784,7 +784,6 @@ def main():
             top_roadmap["roadmap"],
             top_roadmap["projects"]
         )
-
         with open(pdf_path, "rb") as pdf:
             st.download_button(
                 label="📥 Download Career Report",
